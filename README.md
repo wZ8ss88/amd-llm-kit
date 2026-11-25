@@ -81,6 +81,13 @@ have MFMA and are what serving stacks ship kernels for; RDNA parts are
 wave32 and graphics-first. Useful before you promise someone fp8 on a
 desktop card.
 
+Product rows are pinned by tests, because a wrong row is worse than a
+missing one: `gfx940`/`gfx941` are A0 steppings that production MI300
+enumerates past (`gfx942`), MI325X shares `gfx942`, `gfx950` is MI350/MI355,
+and Navi 48 (`gfx1201`, RX 9070/XT) is not Navi 44 (`gfx1200`, RX 9060/XT).
+When `rocminfo` disagrees with this table, `rocminfo` is right — open an
+issue with the line.
+
 ## kvcalc.py
 
 Sizes the KV cache from the model shape:

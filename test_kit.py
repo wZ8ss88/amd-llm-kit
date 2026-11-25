@@ -212,6 +212,36 @@ class TestGfxMap(unittest.TestCase):
     def test_cli_known_target(self):
         self.assertEqual(gfxmap.main(["gfx90a"]), 0)
 
+    # Product rows follow AMD's published target table; these are the ones
+    # that got mixed up before, so pin them.
+    def test_mi325_shares_the_mi300_target(self):
+        self.assertIn("MI325X", gfxmap.lookup("gfx942")[1])
+        self.assertNotIn("MI325X", gfxmap.lookup("gfx950")[1])
+
+    def test_mi300a_is_gfx942_in_production(self):
+        self.assertIn("MI300A", gfxmap.lookup("gfx942")[1])
+
+    def test_gfx950_is_mi350_series(self):
+        for product in ("MI350X", "MI355X"):
+            self.assertIn(product, gfxmap.lookup("gfx950")[1])
+
+    def test_navi_48_and_navi_44_are_distinct(self):
+        self.assertEqual(gfxmap.lookup("gfx1201")[1], "RX 9070, RX 9070 XT")
+        self.assertEqual(gfxmap.lookup("gfx1200")[1], "RX 9060, RX 9060 XT")
+
+    def test_no_product_is_claimed_by_two_shipping_targets(self):
+        # gfx940/gfx941 are A0 steppings and legitimately repeat the production
+        # product names, so they are left out of the uniqueness check.
+        seen = {}
+        for target, row in gfxmap.ARCH.items():
+            if target in ("gfx940", "gfx941"):
+                continue
+            for product in row[1].split(","):
+                product = product.strip().split(" (")[0]
+                self.assertNotIn(product, seen,
+                                 f"{product} listed under {seen.get(product)} and {target}")
+                seen[product] = target
+
 
 if __name__ == "__main__":
     unittest.main()
