@@ -1,12 +1,13 @@
 # amd-llm-kit
 
-Four small, read-only helpers for running LLM inference on AMD GPUs. No
+Five small, read-only helpers for running LLM inference on AMD GPUs. No
 framework, no daemon, no wrapper around your wrapper — standard library
 Python and one bash launcher.
 
 They exist because the boring questions arrive before the interesting ones:
 does this box even have a usable ROCm stack, what is this `gfx` string, how
-much VRAM will the KV cache take, and is the card already full.
+much VRAM will the KV cache take, is the card already full, and does the
+server actually keep its latency once it is up.
 
 | tool | question it answers |
 | --- | --- |
@@ -14,16 +15,19 @@ much VRAM will the KV cache take, and is the card already full.
 | `gfxmap.py` | what is `gfx942` / `gfx1100` and what precisions does it have? |
 | `kvcalc.py` | how much VRAM does the KV cache need for this context and batch? |
 | `vramwatch.py` | is the card about to OOM while the model loads? |
+| `bench.py` | what TTFT / ITL / throughput does a running endpoint really give? |
 
-`serve_vllm.sh` wires the last three into a vLLM launch so the checks run
-before the server does.
+`serve_vllm.sh` wires the probes into a vLLM launch so the checks run before
+the server does.
 
-**Status, plainly:** the pure math and the target table are covered by tests
-and run anywhere (this was developed on Windows). The probe tools call
-`rocm-smi`, `rocminfo` and `/opt/rocm`, so they only say something useful on
-a Linux host with ROCm — everywhere else they report `MISSING` instead of
-pretending. Nothing here has been benchmarked against vendor numbers; the
-formulas and flags are the documented ones, the outputs are what they are.
+**Status, plainly:** the cache math and the target table are covered by tests
+and run anywhere (this was developed on Windows). `bench.py` is also covered
+by tests, but against a throwaway local SSE server — its numbers only mean
+something against a real endpoint. The probe tools call `rocm-smi`,
+`rocminfo` and `/opt/rocm`, so they only say something useful on a Linux host
+with ROCm; everywhere else they report `MISSING` instead of pretending.
+Nothing here has been benchmarked against vendor numbers; the formulas and
+flags are the documented ones, the outputs are what they are.
 
 ## Requirements
 
@@ -31,6 +35,7 @@ formulas and flags are the documented ones, the outputs are what they are.
 - For the probe tools: Linux + ROCm (`rocm-smi`, `rocminfo`) and
   `rocm-smi` on `PATH`.
 - For `serve_vllm.sh`: `vllm` on `PATH`.
+- For `bench.py`: a reachable OpenAI-compatible endpoint.
 
 ## doctor.py
 
@@ -117,6 +122,38 @@ $ python3 vramwatch.py --interval 1 --alert-pct 90
 `--once` is for scripts: exit `0` when clear, `2` when a card is hot, `3`
 when `rocm-smi` is missing.
 
+## bench.py
+
+Times a live endpoint: TTFT per request, inter-token latency, and aggregate
+tokens per second under a fixed concurrency. Streaming only, because none of
+the three means anything without it.
+
+```
+$ python3 bench.py --base-url http://127.0.0.1:8000 --model <served-name> --requests 16 --concurrency 4
+  0  ttft   0.181s  itl    21.4ms    46.7 tok/s  n=128 (usage)
+  ...
+ok 16  failed 0  token count from usage
+aggregate: 430.2 tok/s over 4.76s wall
+ttft p50/p90/p99 ms: 190 / 244 / 261
+itl  p50/p90/p99 ms: 21.0 / 23.9 / 25.1 ms
+```
+
+Two things it is deliberate about:
+
+- **Token counts carry their own provenance.** It asks for
+  `stream_options.include_usage`; a server that sends a `usage` block gives
+  exact completion tokens and the sample is tagged `usage`. A server that
+  rejects the field gets one retry without it, the count falls back to
+  content deltas, and every line is tagged `chunks` — an approximation, said
+  out loud instead of presented as exact.
+- **Failures are samples, not exceptions.** A timeout or an HTTP error is
+  reported per index and counted in `failed`; the exit code is `1` only when
+  no request succeeded.
+
+`--warmup` discards leading requests, `--json PATH` dumps the full per-request
+set, `--timeout` bounds each request. The percentiles are linear-interpolated
+over successful samples only.
+
 ## serve_vllm.sh
 
 Preflight, then `exec vllm serve` — the shell is replaced, so signals reach
@@ -138,7 +175,13 @@ python3 -m unittest -v test_kit
 ```
 
 Thirteen tests over the cache math, the input validation, the target table
-and both CLIs. The probe tools need hardware and are not covered.
+and both CLIs, plus nine more over `bench.py` (percentiles, the `usage`/chunk
+distinction, HTTP and empty-stream failures, the CLI end to end) driven
+against a temporary in-process SSE server. The probe tools need hardware and
+are not covered.
+
+A bench run of the test suite on this machine, for what it is worth: 22 tests
+in 2.4 s.
 
 ## Licence
 
